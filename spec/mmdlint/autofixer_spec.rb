@@ -139,6 +139,19 @@ RSpec.describe Mmdlint::Autofixer do
       fixed = described_class.fix_diagram(raw_llm)
       expect(fixed).to eq("flowchart TD\n  A[\"Start\"] --> B[\"End\"]")
     end
+
+    it "escapes unescaped internal double quotes inside @{ ... } metadata labels" do
+      code = <<~MMD
+        flowchart TD
+          nat@{ icon: "aws:ec2", label: "NAT Gateway "$$"" }
+      MMD
+
+      fixed = described_class.fix_diagram(code)
+      expect(fixed).to include('label: "NAT Gateway \"$$\""')
+
+      result = Mmdlint.lint_diagram(fixed)
+      expect(result).to be_valid
+    end
   end
 
   describe ".fix_markdown" do

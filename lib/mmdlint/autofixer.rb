@@ -136,7 +136,15 @@ module Mmdlint
       s = code.dup
       masks = {}
 
-      # 1. Normalize and mask subgraph titles
+      # 1. Normalize and mask metadata blocks (@{ ... })
+      s.gsub!(/@\{\s*.*?\s*\}/m) do |meta_block|
+        fixed_meta = fix_metadata_attributes(meta_block)
+        placeholder = "__MMD_META_#{masks.size}__"
+        masks[placeholder] = fixed_meta
+        placeholder
+      end
+
+      # 2. Normalize and mask subgraph titles
       s.gsub!(/subgraph\s+([a-zA-Z0-9_.-]+)\s*\[\s*(.*?)\s*\]/) do
         id = $1
         title = $2
@@ -145,14 +153,14 @@ module Mmdlint
         placeholder
       end
 
-      # 2. Normalize and mask edge pipe labels (|Condition (with parens)| -> |"Condition (with parens)"|)
+      # 3. Normalize and mask edge pipe labels (|Condition (with parens)| -> |"Condition (with parens)"|)
       s.gsub!(/\|([^|\n\r]+)\|/) do
         placeholder = "__MMD_PIPE_#{masks.size}__"
         masks[placeholder] = "|" + quote_label($1) + "|"
         placeholder
       end
 
-      # 3. Auto-quote node labels in shapes
+      # 4. Auto-quote node labels in shapes
       s.gsub!(SHAPES_REGEX) do
         id = $1
         full = $2
@@ -218,6 +226,28 @@ module Mmdlint
         end
       end
       fixed_lines.join("\n")
+    end
+
+    def fix_metadata_attributes(block)
+      block.gsub(/(@\{\s*)(.*?)(\s*\})/m) do
+        prefix = $1
+        body = $2
+        suffix = $3
+
+        entries = body.split(/(?<=[a-zA-Z0-9_\x22\x27])\s*,\s*(?=[a-zA-Z0-9_]+\s*:)/)
+        fixed_entries = entries.map do |entry|
+          if entry =~ /\A\s*([a-zA-Z0-9_]+)\s*:\s*\"(.*)\"\s*\z/m
+            key = $1
+            val = $2
+            escaped_val = val.gsub(/(?<!\\)\"/, "\\\"")
+            "#{key}: \"#{escaped_val}\""
+          else
+            entry
+          end
+        end
+
+        "#{prefix}#{fixed_entries.join(", ")}#{suffix}"
+      end
     end
 
     def quote_label(str)
