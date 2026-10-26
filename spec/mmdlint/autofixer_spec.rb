@@ -152,6 +152,47 @@ RSpec.describe Mmdlint::Autofixer do
       result = Mmdlint.lint_diagram(fixed)
       expect(result).to be_valid
     end
+
+it "auto-converts hybrid flowchart header with architecture-beta primitives and unquotes icons" do
+  code = <<~MMD
+    flowchart TD
+    group aws("cloud")["AWS Region"]
+    group edge("cloud")["Edge Network"]
+    service cf("aws:cloudfront")["CloudFront"] in edge
+    service a1("aws:cloudwatch")["5xx Alarm"] in aws
+    cf:R -- L:a1
+  MMD
+
+  fixed = described_class.fix_diagram(code)
+
+  expect(fixed).to start_with("architecture-beta")
+  expect(fixed).to include(%q{group aws(cloud)["AWS Region"]})
+  expect(fixed).to include(%q{group edge(cloud)["Edge Network"]})
+  expect(fixed).to include(%q{service cf(aws:cloudfront)["CloudFront"] in edge})
+  expect(fixed).to include(%q{service a1(aws:cloudwatch)["5xx Alarm"] in aws})
+  expect(fixed).to include("cf:R -- L:a1")
+
+  result = Mmdlint.lint_diagram(fixed)
+  expect(result).to be_valid
+end
+
+it "automatically adds align column for parallel sibling services connecting to the same target" do
+  code = <<~MMD
+    architecture-beta
+    group cloud(cloud)[Cloud]
+    service db1(database)[DB1] in cloud
+    service db2(database)[DB2] in cloud
+    service mcp(server)[MCP] in cloud
+    db1:R -- L:mcp
+    db2:R -- L:mcp
+  MMD
+
+  fixed = described_class.fix_diagram(code)
+  expect(fixed).to include("align column db1 db2")
+
+  result = Mmdlint.lint_diagram(fixed)
+  expect(result).to be_valid
+end
   end
 
   describe ".fix_markdown" do

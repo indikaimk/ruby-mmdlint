@@ -23,6 +23,7 @@ module Mmdlint
       block
       architecture
       c4
+      architecture-beta
     ].freeze
 
     SHAPES_REGEX = Regexp.new(
@@ -73,6 +74,14 @@ module Mmdlint
       cleaned = extract_diagram_content(code)
       return cleaned if cleaned.empty?
 
+      # Convert hybrid flowchart/graph diagrams with architecture-beta primitives
+if cleaned =~ /\A\s*(?:flowchart|graph)\s+[A-Z]{2}/i &&
+   (cleaned.match?(/(?:^|\n)\s*group\s+[a-zA-Z0-9_-]+\s*\(/) ||
+    cleaned.match?(/(?:^|\n)\s*service\s+[a-zA-Z0-9_-]+\s*\(/) ||
+    cleaned.match?(/:[LRTB]\s*(?:--|-->)\s*[LRTB]:/i))
+  cleaned = cleaned.sub(/\A\s*(?:flowchart|graph)\s+[A-Z]{2}\s*\n?/i, "architecture-beta\n")
+end
+
       diagram_type = detect_diagram_type(cleaned)
 
       # 1. Ensure a diagram header exists if completely missing
@@ -86,6 +95,8 @@ module Mmdlint
         cleaned = fix_flowchart(cleaned)
       elsif diagram_type == :sequence
         cleaned = fix_sequence(cleaned)
+      elsif diagram_type == :architecture
+        cleaned = fix_architecture(cleaned)
       end
 
       cleaned.strip
@@ -125,12 +136,70 @@ module Mmdlint
         :state
       when "erDiagram"
         :er
+      when "architecture-beta", "architecture"
+        :architecture
       when *DIAGRAM_HEADERS
         first_word.to_sym
       else
         :unknown
       end
     end
+
+    def fix_architecture(code)
+  s = code.dup
+  s.gsub!(/(group|service)\s+([a-zA-Z0-9_-]+)\s*\(\s*["']([^"'\)\s]+)["']\s*\)/) do
+    "#{$1} #{$2}(#{$3})"
+  end
+  autofix_sibling_alignment(s)
+end
+
+def autofix_sibling_alignment(code)
+  return code unless code.match?(/\A\s*architecture-beta/i)
+
+  declared_ids = code.scan(/(?:service|group)\s+([a-zA-Z0-9_-]+)/).flatten.to_set
+  existing_aligned = code.scan(/align\s+(?:row|column)\s+([^\n]+)/).flatten.join(" ").split(/\s+/).to_set
+
+  edges = []
+  code.scan(/([a-zA-Z0-9_-]+):([LRTB])\s*(?:--|-->)\s*(?:([LRTB]):([a-zA-Z0-9_-]+)|([a-zA-Z0-9_-]+):([LRTB]))/i) do
+    src = $1
+    src_anchor = $2.upcase
+    tgt_anchor = ($3 || $6).upcase
+    tgt = $4 || $5
+    edges << { src: src, src_anchor: src_anchor, tgt_anchor: tgt_anchor, tgt: tgt }
+  end
+
+  new_aligns = []
+
+  # 1. Fan-in: multiple sources connecting to same target anchor
+  fan_in = edges.group_by { |e| [e[:tgt], e[:tgt_anchor], e[:src_anchor]] }
+  fan_in.each do |(tgt, tgt_anchor, src_anchor), group|
+    sources = group.map { |e| e[:src] }.uniq.select { |id| declared_ids.include?(id) }
+    unaligned = sources.reject { |id| existing_aligned.include?(id) }
+    if unaligned.size >= 2
+      axis = %w[L R].include?(src_anchor) ? "column" : "row"
+      new_aligns << "  align #{axis} #{unaligned.join(" ")}"
+      unaligned.each { |id| existing_aligned << id }
+    end
+  end
+
+  # 2. Fan-out: single source connecting to multiple targets with same anchor
+  fan_out = edges.group_by { |e| [e[:src], e[:src_anchor], e[:tgt_anchor]] }
+  fan_out.each do |(src, src_anchor, tgt_anchor), group|
+    targets = group.map { |e| e[:tgt] }.uniq.select { |id| declared_ids.include?(id) }
+    unaligned = targets.reject { |id| existing_aligned.include?(id) }
+    if unaligned.size >= 2
+      axis = %w[L R].include?(tgt_anchor) ? "column" : "row"
+      new_aligns << "  align #{axis} #{unaligned.join(" ")}"
+      unaligned.each { |id| existing_aligned << id }
+    end
+  end
+
+  if new_aligns.any?
+    "#{code.rstrip}\n#{new_aligns.join("\n")}\n"
+  else
+    code
+  end
+end
 
     def fix_flowchart(code)
       s = code.dup
