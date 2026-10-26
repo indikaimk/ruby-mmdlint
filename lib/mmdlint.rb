@@ -7,6 +7,8 @@ require_relative "mmdlint/result"
 require_relative "mmdlint/configuration"
 require_relative "mmdlint/runner"
 require_relative "mmdlint/cli_runner"
+require_relative "mmdlint/autofix_result"
+require_relative "mmdlint/autofixer"
 
 module Mmdlint
   MERMAID_FENCE_REGEX = /^[ \t]*```[ \t]*mermaid/m
@@ -71,6 +73,31 @@ module Mmdlint
       return true if result.valid?
 
       raise ValidationError.new("Mermaid validation failed:\n#{result.error_message}", result)
+    end
+
+    # Programmatically corrects common syntax errors in Mermaid diagrams or Markdown.
+    #
+    # @param input [String] Mermaid diagram source code or Markdown text.
+    # @param type [Symbol, nil] :diagram, :markdown, or nil for auto-detection.
+    # @return [String] Sanitized and corrected Mermaid code or Markdown.
+    def fix(input, type: nil)
+      Autofixer.fix(input, type: type)
+    end
+
+    # Programmatically corrects common syntax errors and validates the corrected result.
+    #
+    # @param input [String] Mermaid diagram source code or Markdown text.
+    # @param type [Symbol, nil] :diagram, :markdown, or nil for auto-detection.
+    # @return [Mmdlint::AutofixResult]
+    def fix_and_validate(input, type: nil)
+      fixed_code = fix(input, type: type)
+      res = lint(fixed_code, type: type)
+
+      AutofixResult.new(
+        original_code: input.to_s,
+        fixed_code: fixed_code,
+        result: res
+      )
     end
 
     private

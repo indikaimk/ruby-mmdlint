@@ -85,7 +85,27 @@ rescue Mmdlint::ValidationError => e
 end
 ```
 
-### 3. Markdown Validation (Multiple Diagrams)
+### 3. Programmatic Autofixing (Instant & Free)
+
+Auto-correct common LLM syntax mistakes (unquoted parentheses/colons in node labels, missing diagram headers, unclosed subgraphs, single-dash arrows `->`, unescaped sequence semicolons) before rendering:
+
+```ruby
+raw_llm = <<~MMD
+  A[User (Admin)] ->|Status: OK (200)| B[(Database: /v1)]
+MMD
+
+# Auto-fix and validate in one step:
+autofix = Mmdlint.fix_and_validate(raw_llm)
+autofix.valid?      # => true
+autofix.fixed?      # => true
+autofix.fixed_code
+# => "flowchart TD\n  A[\"User (Admin)\"] -->|\"Status: OK (200)\"| B[(\"Database: /v1\")]"
+
+# Or sanitize the code directly:
+clean_code = Mmdlint.fix(raw_llm)
+```
+
+### 4. Markdown Validation & Autofixing (Multiple Diagrams)
 
 Validate documents containing one or more fenced ` ```mermaid ` blocks:
 
